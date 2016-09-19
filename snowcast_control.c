@@ -83,8 +83,8 @@ void send_set_station(int fd, uint16_t station_number){
     unsigned char buffer[buf_len];
 
     int off = 0;
-    off += set_int8 (buffer, hello.type);
-    off += set_int16(buffer+off,hello.number);
+    off += set_int8 (buffer, set_station.type);
+    off += set_int16(buffer+off, set_station.number);
 
     if( send( fd, buffer, buf_len, 0)< 0){
         perror("Error: send():");
@@ -105,12 +105,12 @@ int get_int16 (unsigned char* buffer, uint16_t *number){
     return 2;
 }
 
-int get_str(unsigned char* bufer, int buf_len, char* str, int len){
-    if( bufl_en < len ){
+int get_str(unsigned char* buffer, int buf_len, char* str, int len){
+    if( buf_len < len ){
         memcpy(str, buffer, buf_len);
         return buf_len;
     }else{
-        memcpy(str, bufer, len);
+        memcpy(str, buffer, len);
         return len;
     }
 }
@@ -118,28 +118,13 @@ int get_str(unsigned char* bufer, int buf_len, char* str, int len){
 int get_welcome(unsigned char* buffer, int buf_len, struct welcome_msg* welcome){
     int info = 0;
     info += get_int8(buffer, &welcome->type);
-    if (song_msg->type != 1){
+    if (welcome->type != 1){
     	perror("receive error");
     }    
     info += get_int16(buffer + info, &welcome->number);
     //error return -1
     return 0;
 }
-
-
-int get_msg_str(buffer, buflen, struct song_msg* message, &stroff){
-	int info = 0;
-    info += get_int8(buffer, &message->type);
-    if (message->type != 1){
-    	perror("receive error");
-    }
-    info += get_int8(buffer + info, &message->strsize);
-    message->string = (char*)malloc((message->strsize+1)*sizeof(char));
-    *stroff = get_str( buffer + info, buf_len - info, message->string, message->strsize); 
-    info += *stroff;
-    message->string[*stroff] = '\0';    
-    return 0;
-} 
 
 int receive_welcome(int fd){
 	struct welcome_msg welcome;
@@ -166,12 +151,30 @@ int receive_welcome(int fd){
 	return welcome.number;
 }
 
+int get_announce(unsigned char* buffer, int buf_len, struct song_msg* message,int* stroff){
+
+	int info = 0;
+    info += get_int8(buffer, &message->type);
+
+    if (message->type != 1){
+    	perror("receive error");
+    }
+
+    info += get_int8(buffer + info, &message->strsize);
+
+    message->string = (char*)malloc((message->strsize+1)*sizeof(char));
+    *stroff = get_str( buffer + info, buf_len - info, message->string, message->strsize); 
+    info += *stroff;
+    message->string[*stroff] = '\0';    
+    return 0;
+} 
+
 void receive_announce(int fd){
 	int buf_len = 256;
 	unsigned char buffer[buf_len];
 	memset(buffer, 0, buf_len);
 	int bytes;
-	int stroff;
+	int stroff = 0;
 	struct song_msg message;
 	do{
 		bytes = recv(fd, buffer, buf_len, 0);
@@ -183,7 +186,7 @@ void receive_announce(int fd){
 		if (bytes == 0){
 			close(fd);
 		}
-        if( get_msg_str(buffer, buflen, struct song_msg* message,&stroff) < 0 ){
+        if( get_announce(buffer, buf_len, &message, &stroff) < 0 ){
             perror("receive error");
             close(fd);
             exit(1);
@@ -191,6 +194,7 @@ void receive_announce(int fd){
 	}while(bytes == buf_len);
 
 	printf("'%s' is playing.\n",message.string);
+	free(message.string);
 }
 
 void snowcast_control(const char* servername, const char* serverport, int udpport){
@@ -215,7 +219,7 @@ void snowcast_control(const char* servername, const char* serverport, int udppor
 	printf("Station number: %d \n", n_station);
 	
 	while (1){
-		station_number = fgets(stdin);
+		scanf("%d", &station_number);
 		if (station_number > n_station){
 			printf("Station number out of range \n");
 			continue;
