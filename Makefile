@@ -10,6 +10,13 @@ LDFLAGS = -lpthread
 #snowcast_server:   snowcast_server.c extrafile3.c extrafile4.c
 #clean:
 #	rm -f snowcast_listener snowcast_control snowcast_server
-snowcast_control:  snowcast_control.c
+
+#for control
+#snowcast_control:  snowcast_control.c
+#clean:
+#	rm -f snowcast_control
+
+#for listener
+snowcast_control:  snowcast_listener.c
 clean:
-	rm -f snowcast_control
+	rm -f snowcast_listener

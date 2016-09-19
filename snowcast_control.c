@@ -41,6 +41,7 @@ int open_client(const char* servername, const char* serverport){
 		perror("Connect Error");
 		exit(1);
 	}
+	//freeaddrinfo(servinfo);
 	return client_fd;
 }
 
@@ -194,7 +195,7 @@ void receive_announce(int fd){
 	}while(bytes == buf_len);
 
 	printf("'%s' is playing.\n",message.string);
-	free(message.string);
+	//free(message.string);
 }
 
 void snowcast_control(const char* servername, const char* serverport, int udpport){
