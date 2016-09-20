@@ -14,6 +14,7 @@ int open_client(const char* serverport){
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_flags = AI_PASSIVE;
 
 	getaddrinfo(NULL, serverport, &hints, &servinfo);
 
@@ -21,10 +22,7 @@ int open_client(const char* serverport){
 		perror("Socket Error");
 		exit(1);
 	}
-	if (connect(client_fd, servinfo->ai_addr, servinfo->ai_addrlen) <0){
-		perror("Connect Error");
-		exit(1);
-	}
+	bind(client_fd, servinfo->ai_addr, servinfo->ai_addrlen);
 	freeaddrinfo(servinfo);
 	return client_fd;
 }

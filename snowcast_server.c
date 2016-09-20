@@ -4,32 +4,17 @@
 #include <netinet/in.h>
 #include <netdb.h>
 
-/*	Structure
-main thread:
-	create the other threads
+//-----required structure--------
 
-client thread:
-	number of client
-	recv:
-		hello: get udpport
-		set_station
-	send:
-		welcome
-		send announce
-		send invalid_command
+pthread_mutex_t* station_mutexs;
 
-station thread:
-	number of stations
-	send:
-		song data
-		announce when replay
-*/
 struct client{
 	int fd;
 	uint16_t sid;
-	struct station* station; //point to father
+	struct station* station; //point to father station
 	struct sockaddr_in udpaddr;
 	struct sockaddr_in sockaddr;
+	//work as a node in a linked list 
 	struct client* next;
 }
 
@@ -38,12 +23,55 @@ struct station{
 	int id;
 	const char* songname;
 	FILE* file;
+	//list clinets connect to the station
 	struct client* next;
 }
 
-void send_message(int fd, int type, const char* songname){
+struct command{
 
 }
+
+//-----send information----
+
+void send_welcome(int fd, int n_stations){
+
+}
+
+void send_songname(int fd, const char* songname){
+
+}
+
+void send_invalid(int fd, int error_type){
+
+}
+
+//------receive information--
+
+int recv_message(int fd, struct command* cmd){
+
+}
+
+//------client_command------
+
+void* initial_client(void* client){
+
+}
+
+void kill_client(struct client* client){
+
+}
+
+//------client_station interaction-------
+
+int station_add_client(struct client* client, int sid){
+
+}
+
+int station_del_client(struct client* client, int sid){
+
+}
+
+//------station command------
 
 void* intial_station(void* struct_station){
 	struct station* station = (struct station*)struct_station;
@@ -76,7 +104,7 @@ void* intial_station(void* struct_station){
 			pthread_mutex_lock(&station_mutexs[station->id]);
 			client = station->clients;
 			while (client != NULL){
-				send_message(client->fd, 1, station->songname);
+				send_songname(client->fd, station->songname);
 				client = client->next;
 			}
 			pthread_mutex_unlock(&station_mutexs[station->id]);
@@ -95,6 +123,92 @@ void* intial_station(void* struct_station){
 	}
 }
 
+void intial_station(void* struct_station){
+
+}
+
+//-----server command------
+
+void accept_server(int client_fd, struct sockaddr_in client_addr, socklen_t client_addrlen){
+
+}
+
+void quit_server(int n_stations, struct station* stations, int receiver_fd){
+
+}
+
+void print_server(int n_stations,struct station* stations){
+
+}
+
+int open_udp_fd(){
+	int fd;
+	fd = socket( AF_INET, SOCK_DGRAM, 0);
+	return fd;
+}
+
+int open_receiver(const char* tcpport){
+	int receiver_fd;
+
+	struct addrinfo hints, *servinfo;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_flags = AI_PASSIVE;
+
+	getaddrinfo(NULL, serverport, &hints, &servinfo);
+
+	if ((receiver_fd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol)) < 0){
+		perror("Socket Error");
+		exit(1);
+	}
+	bind(client_fd, servinfo->ai_addr, servinfo->ai_addrlen);
+	listen(receiver_fd, SOMAXCONN);
+
+	printf("My address: %s:%d\n",
+        get_sock_ip( (struct sockaddr_in*)servinfo->ai_addr, addrstr,addrstr_len),
+        ntohs(((struct sockaddr_in*)servinfo->ai_addr)->sin_port));
+	freeaddrinfo(servinfo);
+	return receiver_fd;
+}
+
+void snowcast_server(const char*tcpport, int n_stations, (struct station*) stations){
+
+	int receiver_fd = open_server(tcpport);
+
+	fd_set read_fds;
+	int fd_limit;
+	while(1){
+        FD_ZERO(&read_fds);
+        FD_SET( fileno(stdin), &read_fds);
+        FD_SET( receiver_fd, &read_fds);
+
+        fd_max = fileno(stdin);
+        if (receiver_fd > fd_max ){
+            fd_max = receiver_fd;
+        }
+
+        select(fd_max+1, &read_fds, NULL, NULL, NULL);
+
+        if (FD_ISSET( fileno(stdin), &read_fds )){
+            char input_char = fgetc(stdin);
+            if( input_char == 'p' ){
+                print_station(n_stations, stations);
+            }
+            if( input_char == 'q' ){
+                quit_server(n_stations, stations, receiver_fd);
+            }
+        }
+        else if (FD_ISSET(receiver_fd, &read_fds)) {
+        	int client_fd;
+        	struct sockaddr_in client_addr;
+        	socklen_t client_addrlen;
+        	client_fd = accept( receiver_fd, (struct sockaddr*)&client_addr, &client_addrlen);
+            new_client(client_fd, client_addr, client_addrlen);
+        }
+	}
+}
 
 int main(int argc, char** argv){
 	int i;
@@ -125,7 +239,7 @@ int main(int argc, char** argv){
 		stations[i].songname = files[i];
 		stations[i].songfile = NULL;
 		stations[i].clients = NULL;
-		stations[i].udpfd = open_udpfd();
+		stations[i].udpfd = open_udp_fd();
 	}
 
 	//set thread for each station
@@ -135,6 +249,8 @@ int main(int argc, char** argv){
 		pthread_mutex_init(&station_mutexs[i],NULL);
 		pthread_create(&station_threads[i], NULL, intial_station, &stations[i]);
 	}
+
+	snowcast_server(tcpport, n_stations, stations);
 	return 0;
 }
 
