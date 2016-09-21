@@ -30,9 +30,27 @@ struct station{
 struct station* stations;
 
 struct command{
-	//0: hello, 1: station
-
+	//0: hello, 1: set station
+	uint8_t type;
+	uint16_t number;
 }
+
+struct welcome_msg{
+	uint8_t type;
+	uint16_t number;
+};
+
+struct song_msg{
+    uint8_t type;
+    uint8_t strsize;
+    char* string;
+};
+
+struct error_msg{
+    uint8_t type;
+    uint8_t strsize;
+    char* string;
+};
 
 //-----help functions-----
 char* get_sock_ip(struct sockaddr_in* addr, char* str, size_t len){
@@ -43,7 +61,7 @@ char* get_sock_ip(struct sockaddr_in* addr, char* str, size_t len){
 //-----send information----
 
 void send_welcome(int fd, int n_stations){
-
+	
 }
 
 void send_songname(int fd, const char* songname){
@@ -58,8 +76,48 @@ void send_invalid(int fd, int error_type){
 
 //------receive information--
 
-int recv_message(int fd, struct command* cmd){
+int get_int8 (unsigned char* buffer, uint8_t *number){
+    *number = *buffer;
+    return 1;
+}
 
+int get_int16 (unsigned char* buffer, uint16_t *number){
+    memcpy(number, buffer, sizeof(uint16_t));
+    *number = ntohs(*number);
+    return 2;
+}
+
+int get_message(unsigned char* buffer, int buf_len, struct welcome_msg* welcome){
+    int info = 0;
+    info += get_int8(buffer, &command->type);
+    if (welcome->type != 0){
+    	perror("Not Welcome msg");
+    }    
+    info += get_int16(buffer + info, &command->number);
+    //error return -1
+    return 0;
+}
+
+int recv_message(int fd, struct command* cmd){
+	int buf_len = sizeof(uint8_t) + sizeof(uint16_t);
+	unsigned char buffer[buf_len];
+	memset(buffer, 0, buf_len);
+	int bytes = recv(fd, buffer, buf_len, 0);
+
+	if (bytes < 0){
+		perror("Receive Welcome Error");
+		return -1;
+	}
+	if (bytes == 0){
+		printf("Client closed \n");
+		return -1;
+	}
+	if (bytes < buf_len){
+		printf("Length of the msg is wrong. \n");
+		return -1;
+	}
+	get_message(buffer,buf_len,cmd);
+	return 0;
 }
 
 //------client_station interaction-------
