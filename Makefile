@@ -17,9 +17,12 @@ LDFLAGS = -lpthread
 #	rm -f snowcast_control
 
 #for listener
-snowcast_listener:  snowcast_listener.c
+#snowcast_listener:  snowcast_listener.c
+#clean:
+#	rm -f snowcast_listener
+
+#for server
+snowcast_server:   snowcast_server.c
 clean:
-	rm -f snowcast_listener
-
-
+	rm -f snowcast_listener snowcast_control snowcast_server
 

@@ -60,18 +60,146 @@ char* get_sock_ip(struct sockaddr_in* addr, char* str, size_t len){
 
 //-----send information----
 
+int set_int8 (unsigned char* buf, uint8_t n){
+    *buf = n;
+    return 1;
+}
+
+int set_int16(unsigned char* buf, uint16_t n){
+    n = htons(n);
+    memcpy( buf, &n, sizeof(int16_t));
+    return 2;
+}
+
+int set_string(unsigned char* buffer, const char* str, int len){
+	memcpy(buffer, str, len);
+	return len;
+}
+
+int set_extra_string(unsigned char* buffer, int buf_len, const char* str, int len){
+	if (buf_len < len){
+		return set_string(buffer, str, buf_len);
+	}else{
+		return set_string(buffer, str, len);
+	}
+}
+
+int set_songname_str(unsigned char* buffer, int buf_len, struct song_msg* msg){
+	int off = 0;
+	int stroff = 0;
+	off += set_int8(buffer, msg->type);
+	off += set_int8(buffer + off, msg->strsize);
+	stroff = stroff = set_string(buffer + off, buffer - off, msg->string, msg->strsize);
+	return stroff;
+}
+
+int set_songname_str(unsigned char* buffer, int buf_len, struct error_msg* msg){
+	int off = 0;
+	int stroff = 0;
+	off += set_int8(buffer, msg->type);
+	off += set_int8(buffer + off, msg->strsize);
+	stroff = stroff = set_string(buffer + off, buffer - off, msg->string, msg->strsize);
+	return stroff;
+}
+
 void send_welcome(int fd, int n_stations){
-	
+	struct welcome_msg welcome;
+	welcome.type = 0;
+	welcome.number = n_stations;
+
+    int buf_len = sizeof(uint8_t) + sizeof(uint16_t);
+    unsigned char buffer[buf_len];
+
+    int off = 0;
+    off += set_int8 (buffer, hello.type);
+    off += set_int16(buffer+off,hello.number);
+
+    if( send( fd, buffer, buf_len, 0)< 0){
+        perror("Send Welcome Error");
+        close(fd);
+        exit(1);
+    }
 }
 
 void send_songname(int fd, const char* songname){
+	struct song_msg songmsg;
+	songmsg.type = 1;
+	songmsg.strsize = strlen(songname);
+	songmsg.string = (char*) songname;
 
+    int bytes = sizeof(uint8_t) + sizeof(uint8_t) + songmsg.strsize;
+    int buf_len = 256;
+    unsigned char buffer[buf_len];
+
+	stroff = set_songname_str(buffer, buf_len, &songmsg);    
+
+	if (bytes < buf_len){
+		buf_len = bytes;
+	}
+
+    if( send( fd, buffer, buf_len, 0)< 0){
+        perror("Send songname Error");
+        close(fd);
+        exit(1);
+    }
+
+    while(stroff < songmsg.strsize){
+    	bytes = set_extra_string(buffer, buf_len, songmsg.string + stroff, songmsg.strsize - stroff);
+    	stroff += bytes;
+    	if( send( fd, buffer, buf_len, 0)< 0){
+      	  	perror("Send songname Error2");
+        	close(fd);
+        	exit(1);
+    	}    	 
+    }
 }
 
 void send_invalid(int fd, int error_type){
 	// 0: too many hello
 	// 1: too many set_station
 	// 2: unknow
+	struct error_msg errormsg;
+	char* error_content;
+	errormsg.type = 2;
+
+
+	if (error_type == 0){
+		error_content = "Duplicated hello";
+	}else if (error_type == 1){
+		error_content = "Duplicated set_station";
+	}else if (error_type == 2){
+		error_content = "Unknow Error";
+	}else{
+		printf("send_invalid function Error\n");
+	}
+
+	errormsg.strsize = strlen(error_content);
+	errormsg.string = (char*) error_content;
+
+    int buf_len = sizeof(uint8_t) + sizeof(uint8_t) + errormsg.strsize;
+    unsigned char buffer[buf_len];
+
+	stroff = set_invaild_str(buffer, buf_len, &errormsg);    
+
+	if (bytes < buf_len){
+		buf_len = bytes;
+	}
+
+    if( send( fd, buffer, buf_len, 0)< 0){
+        perror("Send invalid msg Error");
+        close(fd);
+        exit(1);
+    }
+
+    while(stroff < errormsg.strsize){
+    	bytes = set_extra_string(buffer, buf_len, errormsg.string + stroff, errormsg.strsize - stroff);
+    	stroff += bytes;
+    	if( send( fd, buffer, buf_len, 0)< 0){
+      	  	perror("Send invalid msg Error2");
+        	close(fd);
+        	exit(1);
+    	}    	 
+    }
 }
 
 //------receive information--
