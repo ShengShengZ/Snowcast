@@ -3,6 +3,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include <sys/select.h>
 
 //-----required structure--------
 
@@ -117,7 +118,7 @@ void send_welcome(int fd, int n_stations){
     if( send( fd, buffer, buf_len, 0)< 0){
         perror("Send Welcome Error");
         close(fd);
-        exit(1);
+        //exit(1);
     }
 }
 
@@ -140,7 +141,7 @@ void send_songname(int fd, const char* songname){
     if( send( fd, buffer, buf_len, 0)< 0){
         perror("Send songname Error");
         close(fd);
-        exit(1);
+        //exit(1);
     }
 
     while(stroff < songmsg.strsize){
@@ -149,7 +150,7 @@ void send_songname(int fd, const char* songname){
     	if( send( fd, buffer, buf_len, 0)< 0){
       	  	perror("Send songname Error2");
         	close(fd);
-        	exit(1);
+        	//exit(1);
     	}    	 
     }
 }
@@ -189,7 +190,7 @@ void send_invalid(int fd, int error_type){
     if( send( fd, buffer, buf_len, 0)< 0){
         perror("Send invalid msg Error");
         close(fd);
-        exit(1);
+        //exit(1);
     }
 
     while(stroff < errormsg.strsize){
@@ -198,7 +199,7 @@ void send_invalid(int fd, int error_type){
     	if( send( fd, buffer, buf_len, 0)< 0){
       	  	perror("Send invalid msg Error2");
         	close(fd);
-        	exit(1);
+        	//exit(1);
     	}    	 
     }
 }
@@ -306,7 +307,7 @@ void kill_client(struct client* client){
 }
 
 void* initial_client(void* client_for_fundation){
-	struct client* client = (strcut client*) client_for_fundation;
+	struct client* client = (struct client*) client_for_fundation;
 	int fd = client->fd;
 	struct command cmd;
 
@@ -364,7 +365,7 @@ void kill_station(struct station* station){
 	pthread_mutex_unlock(&station_mutexs[sid]);
 
 	close(station->udpfd);
-	fclose(station->songfile);
+	fclose(station->file);
 	pthread_exit(NULL); //why?
 }
 
@@ -372,22 +373,21 @@ void* intial_station(void* struct_station){
 	struct station* station = (struct station*)struct_station;
 	struct client* client;
 
-	FILE* file = fopen(station->songname, "r");
+	FILE* file = fopen(station->file, "r");
 	if (file == NULL){
 		printf("Fail to open %s \n", station->songname);
 		kill_station(station);
-		return;
 	}
-	station->songfile = file;
+	station->file = file;
 
-	struct timespec waittime;
+	//struct timespec waittime;
 	int bytes;
 	int buf_len = 1024;
 	unsigned char buffer[buf_len];
 
 	while(1){
-		waittime.tv_sec = 0;
-		waittime.tv_nsec = 62500000;
+	//	waittime.tv_sec = 0;
+	//	waittime.tv_nsec = 62500000;
 
 
 		bytes = fread(buffer, 1, buf_len, file);
@@ -414,7 +414,7 @@ void* intial_station(void* struct_station){
 			client = client->next;
 		}		
 		pthread_mutex_unlock(&station_mutexs[station->id]);
-		nanosleep(waittime,NULL);
+		//nanosleep(waittime,NULL);
 	}
 }
 
@@ -451,12 +451,12 @@ void quit_server(int n_stations, struct station* stations, int receiver_fd){
 
 			client = next;
 		}
-		fclose(station[i].songfile);
+		fclose(stations[i].file);
 		pthread_mutex_unlock(&station_mutexs[i]);
 	}
 	free(stations);
 	free(station_mutexs);
-	exit(0);
+	//exit(0);
 }
 
 void print_server(int n_stations,struct station* stations){
@@ -465,7 +465,7 @@ void print_server(int n_stations,struct station* stations){
 
 	for (int i = 0; i < n_stations; i++){
 		pthread_mutex_lock(&station_mutexs[i]);
-		printf("Station %d plays %s. \n Listener: ", i, station[i].songname);
+		printf("Station %d plays %s. \n Listener: \n", i, stations[i].songname);
 
 		struct client* client;
 		client = stations[i].clients;
@@ -493,14 +493,17 @@ int open_receiver(const char* tcpport){
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_flags = AI_PASSIVE;
 
-	getaddrinfo(NULL, serverport, &hints, &servinfo);
+	getaddrinfo(NULL, tcpport, &hints, &servinfo);
 
 	if ((receiver_fd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol)) < 0){
 		perror("Socket Error");
-		exit(1);
+		//exit(1);
 	}
-	bind(client_fd, servinfo->ai_addr, servinfo->ai_addrlen);
+	bind(receiver_fd, servinfo->ai_addr, servinfo->ai_addrlen);
 	listen(receiver_fd, SOMAXCONN);
+
+    int addrstr_len = INET_ADDRSTRLEN;
+    char addrstr[INET_ADDRSTRLEN];
 
 	printf("My address: %s:%d\n",
         get_sock_ip( (struct sockaddr_in*)servinfo->ai_addr, addrstr,addrstr_len),
@@ -509,12 +512,12 @@ int open_receiver(const char* tcpport){
 	return receiver_fd;
 }
 
-void snowcast_server(const char*tcpport, int n_stations, (struct station*) stations){
+void snowcast_server(const char*tcpport, int n_stations,struct station* stations){
 
-	int receiver_fd = open_server(tcpport);
+	int receiver_fd = open_receiver(tcpport);
 
 	fd_set read_fds;
-	int fd_limit;
+	int fd_max;
 	while(1){
         FD_ZERO(&read_fds);
         FD_SET( fileno(stdin), &read_fds);
@@ -530,7 +533,7 @@ void snowcast_server(const char*tcpport, int n_stations, (struct station*) stati
         if (FD_ISSET( fileno(stdin), &read_fds )){
             char input_char = fgetc(stdin);
             if( input_char == 'p' ){
-                print_station(n_stations, stations);
+                print_server(n_stations, stations);
             }
             if( input_char == 'q' ){
                 quit_server(n_stations, stations, receiver_fd);
@@ -557,7 +560,7 @@ int main(int argc, char** argv){
 	char* tcp_port_input = argv[1];
 	
 	int n_songs = argc - 2;
-	if (n < 0){
+	if (n_songs < 0){
 		printf("Need one song at least \n");
 		return 0;
 	}
@@ -572,21 +575,21 @@ int main(int argc, char** argv){
 	stations = (struct station*)calloc(n_stations,sizeof(struct station));
 	for (i = 0; i < n_songs; i++){
 		stations[i].id = i;
-		stations[i].songname = files[i];
-		stations[i].songfile = NULL;
+		stations[i].songname = songs[i];
+		stations[i].file = NULL;
 		stations[i].clients = NULL;
 		stations[i].udpfd = open_udp_fd();
 	}
 
 	//set thread for each station
 	pthread_t station_threads[n_stations];
-	station_mutexs = (pthread_mutex_t)malloc(n_stations * sizeof(pthread_mutex_t));
+	station_mutexs = (pthread_mutex_t*)malloc(n_stations * sizeof(pthread_mutex_t));
 	for (i = 0; i < n_stations; i++){
 		pthread_mutex_init(&station_mutexs[i],NULL);
 		pthread_create(&station_threads[i], NULL, intial_station, &stations[i]);
 	}
 
-	snowcast_server(tcpport, n_stations, stations);
+	snowcast_server(tcp_port_input, n_stations, stations);
 	return 0;
 }
 
