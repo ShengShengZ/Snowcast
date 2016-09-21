@@ -7,6 +7,7 @@
 //-----required structure--------
 
 pthread_mutex_t* station_mutexs;
+int n_stations;
 
 struct client{
 	int fd;
@@ -24,11 +25,19 @@ struct station{
 	const char* songname;
 	FILE* file;
 	//list clinets connect to the station
-	struct client* next;
+	struct client* clients;
 }
+struct station* stations;
 
 struct command{
+	//0: hello, 1: station
 
+}
+
+//-----help functions-----
+char* get_sock_ip(struct sockaddr_in* addr, char* str, size_t len){
+	inet_ntop(AF_INET, &(addr->sin_addr), str, len);
+	return str;
 }
 
 //-----send information----
@@ -42,7 +51,9 @@ void send_songname(int fd, const char* songname){
 }
 
 void send_invalid(int fd, int error_type){
-
+	// 0: too many hello
+	// 1: too many set_station
+	// 2: unknow
 }
 
 //------receive information--
@@ -51,27 +62,127 @@ int recv_message(int fd, struct command* cmd){
 
 }
 
-//------client_command------
-
-void* initial_client(void* client){
-
-}
-
-void kill_client(struct client* client){
-
-}
-
 //------client_station interaction-------
 
-int station_add_client(struct client* client, int sid){
+int station_del_client(struct client* client, int sid){
+	if (client->station == NULL){
+		return 0;
+	}
+	struct station* station = &stations[sid];
 
+	pthread_mutex_lock(&station_mutexs[sid]);
+
+	struct client* previous = station->clients;
+	struct client* current = station->clients;
+
+	while (current){
+		if (current == client){
+			if (current == station->clients){
+				station->clients = client->next;
+			}else{
+				previous->next = current->next;
+			}
+		}
+		previous = current;
+		current = current->next
+	}
+	client->station = NULL;
+	client->sid = 0;
+
+	pthread_mutex_unlock(&station_mutexs[sid]);
+	return 0;
 }
 
-int station_del_client(struct client* client, int sid){
+int station_add_client(struct client* client, int new_sid){
+	struct station* new_station = &stations[new_sid];
+	if (new_station == client->station){
+		return 0;
+	}
+	station_del_client(client,client->sid);
 
+	pthread_mutex_lock(&station_mutexs[new_sid]);
+	struct client *tmp_client;
+	tmp_client = new_station->client;
+	client->next = tmp_client;
+
+	client->sid = new_sid;
+	client->station = new_station;
+
+	pthread_mutex_lock(&station_mutexs[new_sid]);
+	return 0;
+}
+
+//------client_command------
+
+void kill_client(struct client* client){
+	station_del_client(client, client->sid);
+	close(client->fd);
+	free(client);
+	pthread_exit(NULL);
+}
+
+void* initial_client(void* client_for_fundation){
+	struct client* client = (strcut client*) client_for_fundation;
+	int fd = client->fd;
+	struct command cmd;
+
+	int status = 0;
+
+	while (1){
+		if (recv_message(fd,&cmd) < 0){
+			kill_client(client);
+		}
+		if (cmd.type == 0){
+			if (status != 0){
+				send_invalid(fd,0);
+				kill_client(fd);
+				break;
+			}
+
+			uint16_t udpport = cmd.content;
+			printf("udpport: %d\n",udpport);
+			client->udpaddr = client->sockaddr;
+			client->udpaddr.sin_port = htons(udpport);
+
+			send_welcome(fd, n_stations);
+			status = 1;
+		}else if (cmd.type == 1){
+			if (status != 1){
+				send_invalid(fd,1);
+				kill_client(fd);
+				break;
+			}
+			station_add_client(client, station);
+			send_songname(fd, stations[client->sid].songname);
+		}else{
+			send_invalid(fd,2);
+			kill_client(fd);
+			break;			
+		}
+	}
+	return NULL;
 }
 
 //------station command------
+
+void kill_station(void* struct_station){
+	int sid = station->id;
+
+	pthread_mutex_lock(&station_mutexs[sid]);
+
+	struct client* client = station->clients;
+	while (client != NULL){
+		struct client* next = client->next; //i hate c
+		kill_client(client);
+		client = next;
+	}
+
+	pthread_mutex_unlock(&station_mutexs[sid]);
+
+	close(station->udpfd);
+	fclose(station->songfile);
+	pthread_exit(NULL); //why?
+}
 
 void* intial_station(void* struct_station){
 	struct station* station = (struct station*)struct_station;
@@ -80,7 +191,7 @@ void* intial_station(void* struct_station){
 	FILE* file = fopen(station->songname, "r");
 	if (file == NULL){
 		printf("Fail to open %s \n", station->songname);
-		close_station(station);
+		kill_station(station);
 		return;
 	}
 	station->songfile = file;
@@ -123,22 +234,63 @@ void* intial_station(void* struct_station){
 	}
 }
 
-void intial_station(void* struct_station){
-
-}
-
 //-----server command------
 
 void accept_server(int client_fd, struct sockaddr_in client_addr, socklen_t client_addrlen){
+	pthread_t client_thread;
+	struct client* client;
+	int addrstrlen = INET_ADDRSTRLEN;
+	char addrstr[addrstrlen];
 
+	printf("Connection from %s \n",get_sock_ip(&client_addr, addrstr, addrstrlen));
+
+	client = (struct client*)calloc(1,sizeof(struct client));
+	client.fd = client_fd;
+	client.sid = 0;
+	client.station = NULL; 
+	client.udpaddr = client_addr;
+	client.sockaddr = client_addr;
+	client.next = NULL;
+
+	pthread_create(&client_thread, NULL, initial_client, client);
 }
 
 void quit_server(int n_stations, struct station* stations, int receiver_fd){
+	for (int i = 0; i < n_stations; i++){
+		pthread_mutex_lock(&station_mutexs[i]);
+		struct client* client = stations[i].clients;
+		while (client != NULL){
+			struct client* next = client->next; //i hate c
+			
+			close(client.fd);
+			free(client);
 
+			client = next;
+		}
+		fclose(station[i].songfile);
+		pthread_mutex_unlock(&station_mutexs[i]);
+	}
+	free(stations);
+	free(station_mutexs);
+	exit(0);
 }
 
 void print_server(int n_stations,struct station* stations){
+	int addrstrlen = INET_ADDRSTRLEN;
+	char addrstr[addrstrlen];
 
+	for (int i = 0; i < n_stations; i++){
+		pthread_mutex_lock(&station_mutexs[i]);
+		printf("Station %d plays %s. \n Listener: ", i, station[i].songname);
+
+		struct client* client;
+		client = stations[i].clients;
+		while (client){
+			printf("%s:%d \n",get_sock_ip(&client->sockaddr,addrstr,addrstrlen));
+			client = client->next;
+		}
+		pthread_mutex_unlock(&station_mutexs[i]);
+	}
 }
 
 int open_udp_fd(){
@@ -205,7 +357,7 @@ void snowcast_server(const char*tcpport, int n_stations, (struct station*) stati
         	struct sockaddr_in client_addr;
         	socklen_t client_addrlen;
         	client_fd = accept( receiver_fd, (struct sockaddr*)&client_addr, &client_addrlen);
-            new_client(client_fd, client_addr, client_addrlen);
+            accept_server(client_fd, client_addr, client_addrlen);
         }
 	}
 }
