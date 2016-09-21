@@ -30,7 +30,7 @@ int open_client(const char* serverport){
 void snowcast_listener(const char* udpport){
 	int fd;
 	if ((fd = open_client(udpport)) <0){
-		printf("Conncection failed \n");
+		printf("Open Client failed \n");
 		return;
 	}
 	struct sockaddr_in  server_address;
@@ -39,23 +39,23 @@ void snowcast_listener(const char* udpport){
 	int buf_len = 1024; //defined by music rate
 	char buffer[buf_len];
 
-	struct timespec waittime;
-	waittime.tv_sec = 0;
-	waittime.tv_nsec = 62500000; //calculated by sec/freq
+	//struct timespec waittime;
+	//waittime.tv_sec = 0;
+	//waittime.tv_nsec = 62500000; //calculated by sec/freq
 
 	int byte = 0;
 	while(1){
 		byte = recvfrom(fd,buffer,buf_len,0,(struct sockaddr*)&server_address,&server_address_length);
-		if (byte < 0){
-			printf("Conncection failed \n");
-			return;
+		/*if (byte < 0){
+			printf("Receive failed \n");
+			//return;
 		}
 		if (byte == 0){
-			("Conncection failed \n");
-			return;
-		}
+			("Conncection closed \n");
+			continue;
+		}*/
 		write(fileno(stdout),buffer,sizeof(buffer));
-		nanosleep(&waittime, NULL);
+		//nanosleep(&waittime, NULL);
 	}
 }
 
