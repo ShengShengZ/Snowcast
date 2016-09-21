@@ -39,9 +39,9 @@ void snowcast_listener(const char* udpport){
 	int buf_len = 1024; //defined by music rate
 	char buffer[buf_len];
 
-	//struct timespec waittime;
-	//waittime.tv_sec = 0;
-	//waittime.tv_nsec = 62500000; //calculated by sec/freq
+	struct timespec waittime;
+	waittime.tv_sec = 0;
+	waittime.tv_nsec = 62500000; //calculated by sec/freq
 
 	int byte = 0;
 	while(1){
@@ -55,7 +55,7 @@ void snowcast_listener(const char* udpport){
 			continue;
 		}*/
 		write(fileno(stdout),buffer,sizeof(buffer));
-		//nanosleep(&waittime, NULL);
+		nanosleep(&waittime, NULL);
 	}
 }
 

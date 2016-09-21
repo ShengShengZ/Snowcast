@@ -23,6 +23,11 @@ struct song_msg{
     char* string;
 };
 
+void strtoint(const char* str, int* num){
+    char* end;
+    *num = (int)strtol(str, &end, 10);
+}
+
 int open_client(const char* servername, const char* serverport){
 	int client_fd;
 	struct addrinfo hints, *servinfo;
@@ -69,7 +74,7 @@ void send_hello(int fd, uint16_t udpport){
     off += set_int16(buffer+off,hello.number);
 
     if( send( fd, buffer, buf_len, 0)< 0){
-        perror("Error: send():");
+        perror("Send Hello Error");
         close(fd);
         exit(1);
     }
@@ -88,7 +93,7 @@ void send_set_station(int fd, uint16_t station_number){
     off += set_int16(buffer+off, set_station.number);
 
     if( send( fd, buffer, buf_len, 0)< 0){
-        perror("Error: send():");
+        perror("Send set_station Error");
         close(fd);
         exit(1);
     }
@@ -119,8 +124,8 @@ int get_str(unsigned char* buffer, int buf_len, char* str, int len){
 int get_welcome(unsigned char* buffer, int buf_len, struct welcome_msg* welcome){
     int info = 0;
     info += get_int8(buffer, &welcome->type);
-    if (welcome->type != 1){
-    	perror("receive error");
+    if (welcome->type != 0){
+    	perror("Not Welcome msg");
     }    
     info += get_int16(buffer + info, &welcome->number);
     //error return -1
@@ -137,7 +142,7 @@ int receive_welcome(int fd){
 	do{
 		bytes = recv(fd, buffer, buf_len, 0);
 		if (bytes < 0){
-			perror("receive error");
+			perror("Receive Welcome Error");
 			close(fd);
 		}
 		if (bytes == 0){
@@ -158,7 +163,7 @@ int get_announce(unsigned char* buffer, int buf_len, struct song_msg* message,in
     info += get_int8(buffer, &message->type);
 
     if (message->type != 1){
-    	perror("receive error");
+    	perror("Not Anncounce msg");
     }
 
     info += get_int8(buffer + info, &message->strsize);
@@ -208,15 +213,15 @@ void snowcast_control(const char* servername, const char* serverport, int udppor
 
 	send_hello(client_fd, udpport);
 
-    n_station = receive_welcome(client_fd);
-    if (n_station < 0){
-    	perror("receive error");
-    	return;
-    }
-    if (n_station == 0){
-    	printf("no station avaliable");
-    	return;
-    }
+	n_station = receive_welcome(client_fd);
+	if (n_station < 0){
+	    perror("receive error");
+	    return;
+	}
+	if (n_station == 0){
+	    printf("no station avaliable");
+	    return;
+	}
 	printf("Station number: %d \n", n_station);
 	
 	while (1){
@@ -231,9 +236,13 @@ void snowcast_control(const char* servername, const char* serverport, int udppor
 		}
 		break;
 	}
+	
 	send_set_station(client_fd, station_number);
-
-	receive_announce(client_fd);
+	
+	while (1){
+        	receive_announce(client_fd);
+		//while receiving next song notification, need to detect "q"
+	}
 }
 
 int main(int argc, char * argv[]){
@@ -249,7 +258,7 @@ int main(int argc, char * argv[]){
 
 	servername = argv[1];
 	serverport = argv[2];
-	udpport =argv[3];
+	strtoint(argv[3], &udpport);
 
 	snowcast_control(servername, serverport, udpport);
 	return 0;
