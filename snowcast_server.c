@@ -17,7 +17,7 @@ struct client{
 	struct sockaddr_in sockaddr;
 	//work as a node in a linked list 
 	struct client* next;
-}
+};
 
 struct station{
 	int udpfd;
@@ -26,14 +26,14 @@ struct station{
 	FILE* file;
 	//list clinets connect to the station
 	struct client* clients;
-}
+};
 struct station* stations;
 
 struct command{
 	//0: hello, 1: set station
 	uint8_t type;
 	uint16_t number;
-}
+};
 
 struct welcome_msg{
 	uint8_t type;
@@ -89,16 +89,16 @@ int set_songname_str(unsigned char* buffer, int buf_len, struct song_msg* msg){
 	int stroff = 0;
 	off += set_int8(buffer, msg->type);
 	off += set_int8(buffer + off, msg->strsize);
-	stroff = stroff = set_string(buffer + off, buffer - off, msg->string, msg->strsize);
+	stroff = stroff = set_extra_string(buffer + off, buffer - off, msg->string, msg->strsize);
 	return stroff;
 }
 
-int set_songname_str(unsigned char* buffer, int buf_len, struct error_msg* msg){
+int set_invalid_str(unsigned char* buffer, int buf_len, struct error_msg* msg){
 	int off = 0;
 	int stroff = 0;
 	off += set_int8(buffer, msg->type);
 	off += set_int8(buffer + off, msg->strsize);
-	stroff = stroff = set_string(buffer + off, buffer - off, msg->string, msg->strsize);
+	stroff = stroff = set_extra_string(buffer + off, buffer - off, msg->string, msg->strsize);
 	return stroff;
 }
 
@@ -111,8 +111,8 @@ void send_welcome(int fd, int n_stations){
     unsigned char buffer[buf_len];
 
     int off = 0;
-    off += set_int8 (buffer, hello.type);
-    off += set_int16(buffer+off,hello.number);
+    off += set_int8 (buffer, welcome.type);
+    off += set_int16(buffer+off,welcome.number);
 
     if( send( fd, buffer, buf_len, 0)< 0){
         perror("Send Welcome Error");
@@ -131,7 +131,7 @@ void send_songname(int fd, const char* songname){
     int buf_len = 256;
     unsigned char buffer[buf_len];
 
-	stroff = set_songname_str(buffer, buf_len, &songmsg);    
+	int stroff = set_songname_str(buffer, buf_len, &songmsg);    
 
 	if (bytes < buf_len){
 		buf_len = bytes;
@@ -176,10 +176,11 @@ void send_invalid(int fd, int error_type){
 	errormsg.strsize = strlen(error_content);
 	errormsg.string = (char*) error_content;
 
-    int buf_len = sizeof(uint8_t) + sizeof(uint8_t) + errormsg.strsize;
+    int bytes = sizeof(uint8_t) + sizeof(uint8_t) + errormsg.strsize;
+    int buf_len = 256;
     unsigned char buffer[buf_len];
 
-	stroff = set_invaild_str(buffer, buf_len, &errormsg);    
+	int stroff = set_invalid_str(buffer, buf_len, &errormsg);    
 
 	if (bytes < buf_len){
 		buf_len = bytes;
@@ -215,13 +216,10 @@ int get_int16 (unsigned char* buffer, uint16_t *number){
     return 2;
 }
 
-int get_message(unsigned char* buffer, int buf_len, struct welcome_msg* welcome){
+int get_message(unsigned char* buffer, int buf_len, struct command* cmd){
     int info = 0;
-    info += get_int8(buffer, &command->type);
-    if (welcome->type != 0){
-    	perror("Not Welcome msg");
-    }    
-    info += get_int16(buffer + info, &command->number);
+    info += get_int8(buffer, &cmd->type);
+    info += get_int16(buffer + info, &cmd->number);
     //error return -1
     return 0;
 }
@@ -233,7 +231,7 @@ int recv_message(int fd, struct command* cmd){
 	int bytes = recv(fd, buffer, buf_len, 0);
 
 	if (bytes < 0){
-		perror("Receive Welcome Error");
+		perror("Receive Client Error");
 		return -1;
 	}
 	if (bytes == 0){
@@ -270,7 +268,7 @@ int station_del_client(struct client* client, int sid){
 			}
 		}
 		previous = current;
-		current = current->next
+		current = current->next;
 	}
 	client->station = NULL;
 	client->sid = 0;
@@ -288,7 +286,7 @@ int station_add_client(struct client* client, int new_sid){
 
 	pthread_mutex_lock(&station_mutexs[new_sid]);
 	struct client *tmp_client;
-	tmp_client = new_station->client;
+	tmp_client = new_station->clients;
 	client->next = tmp_client;
 
 	client->sid = new_sid;
@@ -325,7 +323,7 @@ void* initial_client(void* client_for_fundation){
 				break;
 			}
 
-			uint16_t udpport = cmd.content;
+			uint16_t udpport = cmd.number;
 			printf("udpport: %d\n",udpport);
 			client->udpaddr = client->sockaddr;
 			client->udpaddr.sin_port = htons(udpport);
@@ -338,7 +336,7 @@ void* initial_client(void* client_for_fundation){
 				kill_client(fd);
 				break;
 			}
-			station_add_client(client, station);
+			station_add_client(client, cmd.number);
 			send_songname(fd, stations[client->sid].songname);
 		}else{
 			send_invalid(fd,2);
@@ -351,7 +349,7 @@ void* initial_client(void* client_for_fundation){
 
 //------station command------
 
-void kill_station(void* struct_station){
+void kill_station(struct station* station){
 	int sid = station->id;
 
 	pthread_mutex_lock(&station_mutexs[sid]);
@@ -431,12 +429,12 @@ void accept_server(int client_fd, struct sockaddr_in client_addr, socklen_t clie
 	printf("Connection from %s \n",get_sock_ip(&client_addr, addrstr, addrstrlen));
 
 	client = (struct client*)calloc(1,sizeof(struct client));
-	client.fd = client_fd;
-	client.sid = 0;
-	client.station = NULL; 
-	client.udpaddr = client_addr;
-	client.sockaddr = client_addr;
-	client.next = NULL;
+	client->fd = client_fd;
+	client->sid = 0;
+	client->station = NULL; 
+	client->udpaddr = client_addr;
+	client->sockaddr = client_addr;
+	client->next = NULL;
 
 	pthread_create(&client_thread, NULL, initial_client, client);
 }
@@ -448,7 +446,7 @@ void quit_server(int n_stations, struct station* stations, int receiver_fd){
 		while (client != NULL){
 			struct client* next = client->next; //i hate c
 			
-			close(client.fd);
+			close(client->fd);
 			free(client);
 
 			client = next;
