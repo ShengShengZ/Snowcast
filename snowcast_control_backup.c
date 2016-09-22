@@ -6,7 +6,7 @@
 #include <netinet/in.h>
 #include <netdb.h>
 
-//-----msg strcuture----
+//will modify into a general datastruct allowing extra saving
 struct client_msg{
 	uint8_t type;
 	uint16_t number;
@@ -18,52 +18,16 @@ struct welcome_msg{
 };
 
 struct song_msg{
-	//error msg also uses song_smg...
     uint8_t type;
     uint8_t strsize;
     char* string;
 };
 
-//-----int and buffer transformation----
-//set/get are from stackoverflow
 void strtoint(const char* str, int* num){
     char* end;
     *num = (int)strtol(str, &end, 10);
 }
 
-int get_str(unsigned char* buffer, int buf_len, char* str, int len){
-    if( buf_len < len ){
-        memcpy(str, buffer, buf_len);
-        return buf_len;
-    }else{
-        memcpy(str, buffer, len);
-        return len;
-    }
-}
-
-int set_int8 (unsigned char* buf, uint8_t n){
-    *buf = n;
-    return 1;
-}
-
-int set_int16(unsigned char* buf, uint16_t n){
-    n = htons(n);
-    memcpy( buf, &n, sizeof(int16_t));
-    return 2;
-}
-
-int get_int8 (unsigned char* buffer, uint8_t *number){
-    *number = *buffer;
-    return 1;
-}
-
-int get_int16 (unsigned char* buffer, uint16_t *number){
-    memcpy(number, buffer, sizeof(uint16_t));
-    *number = ntohs(*number);
-    return 2;
-}
-
-//----first connection-----
 int open_client(const char* servername, const char* serverport){
 	int client_fd;
 	struct addrinfo hints, *servinfo;
@@ -86,7 +50,17 @@ int open_client(const char* servername, const char* serverport){
 	return client_fd;
 }
 
-//-----send message-----
+int set_int8 (unsigned char* buf, uint8_t n){
+    *buf = n;
+    return 1;
+}
+
+int set_int16(unsigned char* buf, uint16_t n){
+    n = htons(n);
+    memcpy( buf, &n, sizeof(int16_t));
+    return 2;
+}
+
 void send_hello(int fd, uint16_t udpport){
 	struct client_msg hello;
 	hello.type = 0;
@@ -125,7 +99,28 @@ void send_set_station(int fd, uint16_t station_number){
     }
 }
 
-//-----receive message------
+
+int get_int8 (unsigned char* buffer, uint8_t *number){
+    *number = *buffer;
+    return 1;
+}
+
+int get_int16 (unsigned char* buffer, uint16_t *number){
+    memcpy(number, buffer, sizeof(uint16_t));
+    *number = ntohs(*number);
+    return 2;
+}
+
+int get_str(unsigned char* buffer, int buf_len, char* str, int len){
+    if( buf_len < len ){
+        memcpy(str, buffer, buf_len);
+        return buf_len;
+    }else{
+        memcpy(str, buffer, len);
+        return len;
+    }
+}
+
 int get_welcome(unsigned char* buffer, int buf_len, struct welcome_msg* welcome){
     int info = 0;
     info += get_int8(buffer, &welcome->type);
@@ -162,34 +157,56 @@ int receive_welcome(int fd){
 	return welcome.number;
 }
 
-void get_announce(unsigned char* buf, int buflen, struct song_msg* msg,int* stroff){
-   	//this msg includes both song and error msg. Just print it...
-   	int info = 0;
+int get_announce(unsigned char* buf, int buflen, struct song_msg* msg,int* stroff){
+   	int off = 0;
     if( *stroff == 0 ){
 
-        info += get_int8(buf, &msg->type);
-        if( msg->type != 0 && msg->type != 1 && msg->type != 2){
-            printf("error msg received\n");
+        off += get_int8(buf, &msg->type);
+    
+        if( msg->type != 0 && 
+            msg->type != 1 &&
+            msg->type != 2){
+            return -1;
         }
+
         if( msg->type == 0)
-            return;
-        info += get_int8(buf + info, &msg->strsize);
+            return 0;
+
+        off += get_int8(buf+off, &msg->strsize);
+
         msg->string = (char*)malloc((msg->strsize+1)*sizeof(char));
         if( msg->string == NULL){
             perror("Error: malloc fails:");
             exit(1);
         }
         
-        //stroff parts are from github
-        *stroff = get_str( buf+info, buflen-info, msg->string, msg->strsize); 
-        info += *stroff;
+        *stroff = get_str( buf+off, buflen-off, msg->string, msg->strsize); 
+        off += *stroff;
         msg->string[*stroff] = '\0';
     }else{
-        *stroff += get_str( buf, buflen, msg->string+*stroff, msg->strsize-*stroff);
+
+        *stroff += get_str( buf, buflen, 
+                             msg->string+*stroff, msg->strsize-*stroff);
         msg->string[*stroff] = '\0';
     }
-    return;
+    return 0;
 }
+/*
+	int info = 0;
+    info += get_int8(buffer, &message->type);
+
+    if (message->type != 1){
+    	perror("Not Anncounce msg");
+    }
+
+    info += get_int8(buffer + info, &message->strsize);
+
+    message->string = (char*)malloc((message->strsize+1)*sizeof(char));
+    *stroff = get_str( buffer + info, buf_len - info, message->string, message->strsize); 
+    info += *stroff;
+    message->string[*stroff] = '\0';    
+    return 0;
+} */
 
 void receive_announce(int fd){
 	int buf_len = 256;
@@ -200,32 +217,26 @@ void receive_announce(int fd){
 	struct song_msg message;
 	do{
 		bytes = recv(fd, buffer, buf_len, 0);
+		if (bytes < 0){
+			perror("receive error");
+			close(fd);
+			exit(1);
+		}
 		if (bytes == 0){
 			close(fd);
 		}
-        get_announce(buffer, buf_len, &message, &stroff);
+        if( get_announce(buffer, buf_len, &message, &stroff) < 0 ){
+            perror("receive error");
+            close(fd);
+            exit(1);
+        }
 	}while(bytes == buf_len);
 
 	printf("%s\n",message.string);
-	free(message.string);
+	//free(message.string);
 }
 
-//-----main function------
-//-----simply use two loops-----
-int main(int argc, char * argv[]){
-
-	if (argc != 4){
-		printf("Correct Input Format: snowcast_control <servername> <serverport> <udpport> \n");
-		return 0;
-	}
-
-	char *servername;
-	char *serverport;
-	int udpport;
-
-	servername = argv[1];
-	serverport = argv[2];
-	strtoint(argv[3], &udpport);
+void snowcast_control(const char* servername, const char* serverport, int udpport){
 
 	int client_fd;
 	int n_station = -1;
@@ -238,11 +249,11 @@ int main(int argc, char * argv[]){
 	n_station = receive_welcome(client_fd);
 	if (n_station < 0){
 	    perror("receive error");
-	    return 0;
+	    return;
 	}
 	if (n_station == 0){
 	    printf("no station avaliable");
-	    return 0;
+	    return;
 	}
 	printf("Station number: %d \n", n_station);
 	
@@ -262,9 +273,26 @@ int main(int argc, char * argv[]){
 	send_set_station(client_fd, station_number);
 	
 	while (1){
-		//failed to apply FD function here, so no quit function       	
-        receive_announce(client_fd);
+        	receive_announce(client_fd);
+		//while receiving next song notification, need to detect "q"
+	}
+}
+
+int main(int argc, char * argv[]){
+
+	if (argc != 4){
+		printf("Correct Input Format: snowcast_control <servername> <serverport> <udpport> \n");
+		exit(0);
 	}
 
+	char *servername;
+	char *serverport;
+	int udpport;
+
+	servername = argv[1];
+	serverport = argv[2];
+	strtoint(argv[3], &udpport);
+
+	snowcast_control(servername, serverport, udpport);
 	return 0;
 }

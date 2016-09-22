@@ -7,33 +7,7 @@
 #include <pthread.h>
 #include <sys/time.h>
 
-#define ONE_BILLION    1000000000
-
-//-----message structure-------
-struct command{
-	//msg from clients
-	//0: hello, 1: set station
-	uint8_t type;
-	uint16_t number;
-};
-
-struct welcome_msg{
-	uint8_t type;
-	uint16_t number;
-};
-
-struct song_msg{
-    uint8_t type;
-    uint8_t length_of_string;
-    char* string;
-};
-
-struct error_msg{
-    uint8_t type;
-    uint8_t length_of_string;
-    char* string;
-};
-
+#define NANO_PER_SEC    1000000000
 //-----required structure--------
 
 pthread_mutex_t* station_mutexs;
@@ -50,14 +24,37 @@ struct client{
 };
 
 struct station{
-	int udp_fd;
+	int udpfd;
 	int id;
 	const char* songname;
 	FILE* file;
-	//list clients connect to the station
+	//list clinets connect to the station
 	struct client* clients;
 };
 struct station* stations;
+
+struct command{
+	//0: hello, 1: set station
+	uint8_t type;
+	uint16_t number;
+};
+
+struct welcome_msg{
+	uint8_t type;
+	uint16_t number;
+};
+
+struct song_msg{
+    uint8_t type;
+    uint8_t strsize;
+    char* string;
+};
+
+struct error_msg{
+    uint8_t type;
+    uint8_t strsize;
+    char* string;
+};
 
 //-----help functions-----
 char* get_sock_ip(struct sockaddr_in* addr, char* str, size_t len){
@@ -65,8 +62,8 @@ char* get_sock_ip(struct sockaddr_in* addr, char* str, size_t len){
 	return str;
 }
 
-//-----information analysis----
-//the way translate msg to defined struct is from stackoverflow
+//-----send information----
+
 int set_int8 (unsigned char* buf, uint8_t n){
     *buf = n;
     return 1;
@@ -75,17 +72,6 @@ int set_int8 (unsigned char* buf, uint8_t n){
 int set_int16(unsigned char* buf, uint16_t n){
     n = htons(n);
     memcpy( buf, &n, sizeof(int16_t));
-    return 2;
-}
-
-int get_int8 (unsigned char* buffer, uint8_t *number){
-    *number = *buffer;
-    return 1;
-}
-
-int get_int16 (unsigned char* buffer, uint16_t *number){
-    memcpy(number, buffer, sizeof(uint16_t));
-    *number = ntohs(*number);
     return 2;
 }
 
@@ -106,8 +92,8 @@ int set_songname_str(unsigned char* buffer, int buf_len, struct song_msg* msg){
 	int off = 0;
 	int stroff = 0;
 	off += set_int8(buffer, msg->type);
-	off += set_int8(buffer + off, msg->length_of_string);
-	stroff = stroff = set_extra_string(buffer + off, buffer - off, msg->string, msg->length_of_string);
+	off += set_int8(buffer + off, msg->strsize);
+	stroff = stroff = set_extra_string(buffer + off, buffer - off, msg->string, msg->strsize);
 	return stroff;
 }
 
@@ -115,20 +101,11 @@ int set_invalid_str(unsigned char* buffer, int buf_len, struct error_msg* msg){
 	int off = 0;
 	int stroff = 0;
 	off += set_int8(buffer, msg->type);
-	off += set_int8(buffer + off, msg->length_of_string);
-	stroff = stroff = set_extra_string(buffer + off, buffer - off, msg->string, msg->length_of_string);
+	off += set_int8(buffer + off, msg->strsize);
+	stroff = stroff = set_extra_string(buffer + off, buffer - off, msg->string, msg->strsize);
 	return stroff;
 }
 
-int get_message(unsigned char* buffer, int buf_len, struct command* cmd){
-    int info = 0;
-    info += get_int8(buffer, &cmd->type);
-    info += get_int16(buffer + info, &cmd->number);
-    //error return -1
-    return 0;
-}
-
-//-----send message to client------
 void send_welcome(int fd, int n_stations){
 	struct welcome_msg welcome;
 	welcome.type = 0;
@@ -137,9 +114,9 @@ void send_welcome(int fd, int n_stations){
     int buf_len = sizeof(uint8_t) + sizeof(uint16_t);
     unsigned char buffer[buf_len];
 
-    int info = 0;
-    info += set_int8 (buffer, welcome.type);
-    info += set_int16(buffer+info,welcome.number);
+    int off = 0;
+    off += set_int8 (buffer, welcome.type);
+    off += set_int16(buffer+off,welcome.number);
 
     if( send( fd, buffer, buf_len, 0)< 0){
         perror("Send Welcome Error");
@@ -151,10 +128,10 @@ void send_welcome(int fd, int n_stations){
 void send_songname(int fd, const char* songname){
 	struct song_msg songmsg;
 	songmsg.type = 1;
-	songmsg.length_of_string = strlen(songname);
+	songmsg.strsize = strlen(songname);
 	songmsg.string = (char*) songname;
 
-    int bytes = sizeof(uint8_t) + sizeof(uint8_t) + songmsg.length_of_string;
+    int bytes = sizeof(uint8_t) + sizeof(uint8_t) + songmsg.strsize;
     int buf_len = 256;
     unsigned char buffer[buf_len];
 
@@ -170,8 +147,8 @@ void send_songname(int fd, const char* songname){
         exit(1);
     }
 
-    while(stroff < songmsg.length_of_string){
-    	bytes = set_extra_string(buffer, buf_len, songmsg.string + stroff, songmsg.length_of_string - stroff);
+    while(stroff < songmsg.strsize){
+    	bytes = set_extra_string(buffer, buf_len, songmsg.string + stroff, songmsg.strsize - stroff);
     	stroff += bytes;
     	if( send( fd, buffer, buf_len, 0)< 0){
       	  	perror("Send songname Error2");
@@ -200,10 +177,10 @@ void send_invalid(int fd, int error_type){
 		printf("send_invalid function Error\n");
 	}
 
-	errormsg.length_of_string = strlen(error_content);
+	errormsg.strsize = strlen(error_content);
 	errormsg.string = (char*) error_content;
 
-    int bytes = sizeof(uint8_t) + sizeof(uint8_t) + errormsg.length_of_string;
+    int bytes = sizeof(uint8_t) + sizeof(uint8_t) + errormsg.strsize;
     int buf_len = 256;
     unsigned char buffer[buf_len];
 
@@ -219,8 +196,8 @@ void send_invalid(int fd, int error_type){
         exit(1);
     }
 
-    while(stroff < errormsg.length_of_string){
-    	bytes = set_extra_string(buffer, buf_len, errormsg.string + stroff, errormsg.length_of_string - stroff);
+    while(stroff < errormsg.strsize){
+    	bytes = set_extra_string(buffer, buf_len, errormsg.string + stroff, errormsg.strsize - stroff);
     	stroff += bytes;
     	if( send( fd, buffer, buf_len, 0)< 0){
       	  	perror("Send invalid msg Error2");
@@ -230,13 +207,37 @@ void send_invalid(int fd, int error_type){
     }
 }
 
-//------receive information-----
+//------receive information--
+
+int get_int8 (unsigned char* buffer, uint8_t *number){
+    *number = *buffer;
+    return 1;
+}
+
+int get_int16 (unsigned char* buffer, uint16_t *number){
+    memcpy(number, buffer, sizeof(uint16_t));
+    *number = ntohs(*number);
+    return 2;
+}
+
+int get_message(unsigned char* buffer, int buf_len, struct command* cmd){
+    int info = 0;
+    info += get_int8(buffer, &cmd->type);
+    info += get_int16(buffer + info, &cmd->number);
+    //error return -1
+    return 0;
+}
+
 int recv_message(int fd, struct command* cmd){
 	int buf_len = sizeof(uint8_t) + sizeof(uint16_t);
 	unsigned char buffer[buf_len];
 	memset(buffer, 0, buf_len);
 	int bytes = recv(fd, buffer, buf_len, 0);
 
+	if (bytes < 0){
+		perror("Receive Client Error");
+		return -1;
+	}
 	if (bytes == 0){
 		printf("Client closed \n");
 		return -1;
@@ -263,7 +264,6 @@ int station_del_client(struct client* client, int sid){
 	struct client* current = station->clients;
 
 	while (current){
-	//go through linked list
 		if (current == client){
 			if (current == station->clients){
 				station->clients = client->next;
@@ -370,12 +370,12 @@ void kill_station(struct station* station){
 
 	pthread_mutex_unlock(&station_mutexs[sid]);
 
-	close(station->udp_fd);
+	close(station->udpfd);
 	fclose(station->file);
-	pthread_exit(NULL); 
+	pthread_exit(NULL); //why?
 }
 
-void* initial_station(void* struct_station){
+void* intial_station(void* struct_station){
 	struct station* station = (struct station*)struct_station;
 	struct client* client;
 
@@ -386,17 +386,21 @@ void* initial_station(void* struct_station){
 	}
 	station->file = file;
 
-	struct timespec waittime, time1, time2;
+	struct timespec interval, start_time, end_time;
 	
 	int buf_len = 1024;
 	unsigned char buffer[buf_len];
 
 	while(1){
-        waittime.tv_sec = 0;
-        waittime.tv_nsec = ONE_BILLION/16;
-        clock_gettime(CLOCK_REALTIME, &time1);
+        interval.tv_sec = 0;
+        interval.tv_nsec = NANO_PER_SEC/16;
+        clock_gettime(CLOCK_REALTIME, &start_time);
 
 		int bytes = fread(buffer, 1, buf_len, file);
+		if (bytes < 0){
+			perror("Error Read file");
+			kill_station(station);
+		}
 		//file end
 		if (feof(file)){
 			rewind(file);
@@ -418,25 +422,25 @@ void* initial_station(void* struct_station){
 		pthread_mutex_lock(&station_mutexs[station->id]);
 		client = station->clients;
 		while (client != NULL){
-			bytes = sendto(station->udp_fd, buffer, buf_len, 0, (struct sockaddr*)&client->udpaddr, sizeof(struct sockaddr));
+			bytes = sendto(station->udpfd, buffer, buf_len, 0, (struct sockaddr*)&client->udpaddr, sizeof(struct sockaddr));
 			client = client->next;
 		}		
 		pthread_mutex_unlock(&station_mutexs[station->id]);
 		
-        clock_gettime(CLOCK_REALTIME, &time2);
-        //time set modified from stackoverflow
-        if( time2.tv_nsec < time1.tv_nsec ){
-        	waittime.tv_sec  += time2.tv_sec - time1.tv_sec -1;
-        	waittime.tv_nsec += ONE_BILLION + time2.tv_nsec - time1.tv_nsec;
+        clock_gettime(CLOCK_REALTIME, &end_time);
+        
+        if( end_time.tv_nsec < start_time.tv_nsec ){
+        	interval.tv_sec  += end_time.tv_sec - start_time.tv_sec -1;
+        	interval.tv_nsec += NANO_PER_SEC + end_time.tv_nsec - start_time.tv_nsec;
     	}else{
-        	waittime.tv_sec  += time2.tv_sec - time1.tv_sec;
-        	waittime.tv_nsec += time2.tv_nsec- time1.tv_nsec;
+        	interval.tv_sec  += end_time.tv_sec - start_time.tv_sec;
+        	interval.tv_nsec += end_time.tv_nsec- start_time.tv_nsec;
     	}
-    	if( waittime.tv_nsec > ONE_BILLION ){
-        	waittime.tv_sec +=waittime.tv_nsec % ONE_BILLION;
-        	waittime.tv_nsec =waittime.tv_nsec / ONE_BILLION;
+    	if( interval.tv_nsec > NANO_PER_SEC ){
+        	interval.tv_sec +=interval.tv_nsec % NANO_PER_SEC;
+        	interval.tv_nsec =interval.tv_nsec / NANO_PER_SEC;
     	}    	        
-        nanosleep(&waittime, NULL);
+        nanosleep(&interval, NULL);
 	}
 }
 
@@ -495,7 +499,7 @@ void print_server(int n_stations,struct station* stations){
 		struct client* client;
 		client = stations[i].clients;
 		while (client){
-			printf("	%s:%d; \n",get_sock_ip(&client->sockaddr,addrstr,addrstrlen),ntohs(client->sockaddr.sin_port));
+			printf("%s:%d; \n",get_sock_ip(&client->sockaddr,addrstr,addrstrlen),ntohs(client->sockaddr.sin_port));
 			client = client->next;
 		}
 		pthread_mutex_unlock(&station_mutexs[i]);
@@ -520,8 +524,10 @@ int open_receiver(const char* tcpport){
 
 	getaddrinfo(NULL, tcpport, &hints, &servinfo);
 
-	receiver_fd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol);
-
+	if ((receiver_fd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol)) < 0){
+		perror("Socket Error");
+		exit(1);
+	}
 	bind(receiver_fd, servinfo->ai_addr, servinfo->ai_addrlen);
 	listen(receiver_fd, SOMAXCONN);
 
@@ -529,11 +535,10 @@ int open_receiver(const char* tcpport){
 	return receiver_fd;
 }
 
-void main_loop(const char*tcpport, int n_stations,struct station* stations){
+void snowcast_server(const char*tcpport, int n_stations,struct station* stations){
 
 	int receiver_fd = open_receiver(tcpport);
 
-	//fd code from textbook
 	fd_set read_fds;
 	int fd_max;
 	while(1){
@@ -596,7 +601,7 @@ int main(int argc, char** argv){
 		stations[i].songname = songs[i];
 		stations[i].file = NULL;
 		stations[i].clients = NULL;
-		stations[i].udp_fd = open_udp_fd();
+		stations[i].udpfd = open_udp_fd();
 	}
 
 	//set thread for each station
@@ -604,10 +609,10 @@ int main(int argc, char** argv){
 	station_mutexs = (pthread_mutex_t*)malloc(n_stations * sizeof(pthread_mutex_t));
 	for (i = 0; i < n_stations; i++){
 		pthread_mutex_init(&station_mutexs[i],NULL);
-		pthread_create(&station_threads[i], NULL, initial_station, &stations[i]);
+		pthread_create(&station_threads[i], NULL, intial_station, &stations[i]);
 	}
 
-	main_loop(tcp_port_input, n_stations, stations);
+	snowcast_server(tcp_port_input, n_stations, stations);
 	return 0;
 }
 
