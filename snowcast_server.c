@@ -7,6 +7,7 @@
 #include <pthread.h>
 #include <sys/time.h>
 
+#define NANO_PER_SEC    1000000000
 //-----required structure--------
 
 pthread_mutex_t* station_mutexs;
@@ -59,24 +60,6 @@ struct error_msg{
 char* get_sock_ip(struct sockaddr_in* addr, char* str, size_t len){
 	inet_ntop(AF_INET, &(addr->sin_addr), str, len);
 	return str;
-}
-
-#define NANO_PER_SEC    1000000000
-void time_calibrate(struct timespec start, struct timespec end, 
-                    struct timespec* result){
-    if( end.tv_nsec < start.tv_nsec ){
-        result->tv_sec  += end.tv_sec - start.tv_sec -1;
-        result->tv_nsec += NANO_PER_SEC + end.tv_nsec - start.tv_nsec;
-    }
-    else{
-        result->tv_sec  += end.tv_sec - start.tv_sec;
-        result->tv_nsec += end.tv_nsec- start.tv_nsec;
-    }
-
-    if( result->tv_nsec > NANO_PER_SEC ){
-        result->tv_sec += result->tv_nsec % NANO_PER_SEC;
-        result->tv_nsec = result->tv_nsec / NANO_PER_SEC;
-    }
 }
 
 //-----send information----
@@ -405,7 +388,6 @@ void* intial_station(void* struct_station){
 
 	struct timespec interval, start_time, end_time;
 	
-	int bytes;
 	int buf_len = 1024;
 	unsigned char buffer[buf_len];
 
@@ -414,19 +396,24 @@ void* intial_station(void* struct_station){
         interval.tv_nsec = NANO_PER_SEC/16;
         clock_gettime(CLOCK_REALTIME, &start_time);
 
-		bytes = fread(buffer, 1, buf_len, file);
-
+		int bytes = fread(buffer, 1, buf_len, file);
+		if (bytes < 0){
+			perror("Error Read file");
+			kill_station(station);
+		}
 		//file end
 		if (feof(file)){
 			rewind(file);
 
 			pthread_mutex_lock(&station_mutexs[station->id]);
+			
 			client = station->clients;
 			while (client != NULL){
-				printf("send_songname2 \n");
+				printf("Resend Songname \n");
 				send_songname(client->fd, station->songname);
 				client = client->next;
 			}
+			
 			pthread_mutex_unlock(&station_mutexs[station->id]);
 			continue;
 		}
@@ -441,7 +428,18 @@ void* intial_station(void* struct_station){
 		pthread_mutex_unlock(&station_mutexs[station->id]);
 		
         clock_gettime(CLOCK_REALTIME, &end_time);
-        time_calibrate(start_time, end_time, &interval);
+        
+        if( end_time.tv_nsec < start_time.tv_nsec ){
+        	interval.tv_sec  += end_time.tv_sec - start_time.tv_sec -1;
+        	interval.tv_nsec += NANO_PER_SEC + end_time.tv_nsec - start_time.tv_nsec;
+    	}else{
+        	interval.tv_sec  += end_time.tv_sec - start_time.tv_sec;
+        	interval.tv_nsec += end_time.tv_nsec- start_time.tv_nsec;
+    	}
+    	if( interval.tv_nsec > NANO_PER_SEC ){
+        	interval.tv_sec +=interval.tv_nsec % NANO_PER_SEC;
+        	interval.tv_nsec =interval.tv_nsec / NANO_PER_SEC;
+    	}    	        
         nanosleep(&interval, NULL);
 	}
 }
@@ -533,12 +531,6 @@ int open_receiver(const char* tcpport){
 	bind(receiver_fd, servinfo->ai_addr, servinfo->ai_addrlen);
 	listen(receiver_fd, SOMAXCONN);
 
-    int addrstr_len = INET_ADDRSTRLEN;
-    char addrstr[INET_ADDRSTRLEN];
-
-	printf("My address: %s:%d\n",
-        get_sock_ip( (struct sockaddr_in*)servinfo->ai_addr, addrstr,addrstr_len),
-        ntohs(((struct sockaddr_in*)servinfo->ai_addr)->sin_port));
 	freeaddrinfo(servinfo);
 	return receiver_fd;
 }

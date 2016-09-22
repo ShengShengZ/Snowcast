@@ -6,32 +6,45 @@
 #include <netinet/in.h>
 #include <netdb.h>
 
-int open_client(const char* serverport){
-	//same as snowcast_control
-	int client_fd;
-	struct addrinfo hints, *servinfo;
+int open_client(const char* port){
 
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_INET;
-	hints.ai_socktype = SOCK_STREAM;
-	hints.ai_flags = AI_PASSIVE;
+    int clientfd;
 
-	getaddrinfo(NULL, serverport, &hints, &servinfo);
+    int ai_err;
+    struct addrinfo hints, *info;
 
-	if ((client_fd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol)) < 0){
-		perror("Socket Error");
-		exit(1);
-	}
-	bind(client_fd, servinfo->ai_addr, servinfo->ai_addrlen);
-	freeaddrinfo(servinfo);
-	return client_fd;
+    memset( &hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_flags = AI_PASSIVE;
+
+    if( (ai_err = getaddrinfo( NULL, port, &hints, &info)) != 0){
+        fprintf(stderr, "Error: getaddrinfo: %s\n", 
+                gai_strerror(ai_err));
+        return -1;
+    }
+
+    if( (clientfd = socket( info->ai_family, 
+                            info->ai_socktype,
+                            info->ai_protocol) ) < 0){
+        perror("Error: socket():");
+        return -1;
+    }
+
+    if( bind(clientfd, info->ai_addr, info->ai_addrlen) < 0){
+        perror("Error: bind():");
+        return -1;
+    }
+
+    freeaddrinfo(info);
+    return clientfd;
 }
 
 void snowcast_listener(const char* udpport){
 	int fd;
 	if ((fd = open_client(udpport)) <0){
 		printf("Open Client failed \n");
-		return;
+		exit(1);
 	}
 	struct sockaddr_in  server_address;
 	socklen_t server_address_length;
@@ -41,19 +54,18 @@ void snowcast_listener(const char* udpport){
 
 	struct timespec waittime;
 	waittime.tv_sec = 0;
-	waittime.tv_nsec = 62500000; //calculated by sec/freq
+	waittime.tv_nsec = 1000000000/16; //calculated by sec/freq
 
-	int byte = 0;
 	while(1){
-		byte = recvfrom(fd,buffer,buf_len,0,(struct sockaddr*)&server_address,&server_address_length);
-		/*if (byte < 0){
+		int bytes = recvfrom(fd,buffer,buf_len,0,(struct sockaddr*)&server_address,&server_address_length);
+		if (bytes < 0){
 			printf("Receive failed \n");
-			//return;
+			exit(1);
 		}
-		if (byte == 0){
+		if (bytes == 0){
 			("Conncection closed \n");
 			continue;
-		}*/
+		}
 		write(fileno(stdout),buffer,sizeof(buffer));
 		nanosleep(&waittime, NULL);
 	}

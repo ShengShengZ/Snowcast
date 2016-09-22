@@ -157,8 +157,41 @@ int receive_welcome(int fd){
 	return welcome.number;
 }
 
-int get_announce(unsigned char* buffer, int buf_len, struct song_msg* message,int* stroff){
+int get_announce(unsigned char* buf, int buflen, struct song_msg* msg,int* stroff){
+   	int off = 0;
+    if( *stroff == 0 ){
 
+        off += get_int8(buf, &msg->type);
+    
+        if( msg->type != 0 && 
+            msg->type != 1 &&
+            msg->type != 2){
+            return -1;
+        }
+
+        if( msg->type == 0)
+            return 0;
+
+        off += get_int8(buf+off, &msg->strsize);
+
+        msg->string = (char*)malloc((msg->strsize+1)*sizeof(char));
+        if( msg->string == NULL){
+            perror("Error: malloc fails:");
+            exit(1);
+        }
+        
+        *stroff = get_str( buf+off, buflen-off, msg->string, msg->strsize); 
+        off += *stroff;
+        msg->string[*stroff] = '\0';
+    }else{
+
+        *stroff += get_str( buf, buflen, 
+                             msg->string+*stroff, msg->strsize-*stroff);
+        msg->string[*stroff] = '\0';
+    }
+    return 0;
+}
+/*
 	int info = 0;
     info += get_int8(buffer, &message->type);
 
@@ -173,7 +206,7 @@ int get_announce(unsigned char* buffer, int buf_len, struct song_msg* message,in
     info += *stroff;
     message->string[*stroff] = '\0';    
     return 0;
-} 
+} */
 
 void receive_announce(int fd){
 	int buf_len = 256;
@@ -199,7 +232,7 @@ void receive_announce(int fd){
         }
 	}while(bytes == buf_len);
 
-	printf("'%s' is playing.\n",message.string);
+	printf("%s\n",message.string);
 	//free(message.string);
 }
 
