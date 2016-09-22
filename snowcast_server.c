@@ -4,6 +4,8 @@
 #include <netinet/in.h>
 #include <netdb.h>
 #include <sys/select.h>
+#include <pthread.h>
+#include <sys/time.h>
 
 //-----required structure--------
 
@@ -57,6 +59,24 @@ struct error_msg{
 char* get_sock_ip(struct sockaddr_in* addr, char* str, size_t len){
 	inet_ntop(AF_INET, &(addr->sin_addr), str, len);
 	return str;
+}
+
+#define NANO_PER_SEC    1000000000
+void time_calibrate(struct timespec start, struct timespec end, 
+                    struct timespec* result){
+    if( end.tv_nsec < start.tv_nsec ){
+        result->tv_sec  += end.tv_sec - start.tv_sec -1;
+        result->tv_nsec += NANO_PER_SEC + end.tv_nsec - start.tv_nsec;
+    }
+    else{
+        result->tv_sec  += end.tv_sec - start.tv_sec;
+        result->tv_nsec += end.tv_nsec- start.tv_nsec;
+    }
+
+    if( result->tv_nsec > NANO_PER_SEC ){
+        result->tv_sec += result->tv_nsec % NANO_PER_SEC;
+        result->tv_nsec = result->tv_nsec / NANO_PER_SEC;
+    }
 }
 
 //-----send information----
@@ -118,7 +138,7 @@ void send_welcome(int fd, int n_stations){
     if( send( fd, buffer, buf_len, 0)< 0){
         perror("Send Welcome Error");
         close(fd);
-        //exit(1);
+        exit(1);
     }
 }
 
@@ -141,7 +161,7 @@ void send_songname(int fd, const char* songname){
     if( send( fd, buffer, buf_len, 0)< 0){
         perror("Send songname Error");
         close(fd);
-        //exit(1);
+        exit(1);
     }
 
     while(stroff < songmsg.strsize){
@@ -150,7 +170,7 @@ void send_songname(int fd, const char* songname){
     	if( send( fd, buffer, buf_len, 0)< 0){
       	  	perror("Send songname Error2");
         	close(fd);
-        	//exit(1);
+        	exit(1);
     	}    	 
     }
 }
@@ -190,7 +210,7 @@ void send_invalid(int fd, int error_type){
     if( send( fd, buffer, buf_len, 0)< 0){
         perror("Send invalid msg Error");
         close(fd);
-        //exit(1);
+        exit(1);
     }
 
     while(stroff < errormsg.strsize){
@@ -199,7 +219,7 @@ void send_invalid(int fd, int error_type){
     	if( send( fd, buffer, buf_len, 0)< 0){
       	  	perror("Send invalid msg Error2");
         	close(fd);
-        	//exit(1);
+        	exit(1);
     	}    	 
     }
 }
@@ -286,14 +306,16 @@ int station_add_client(struct client* client, int new_sid){
 	station_del_client(client,client->sid);
 
 	pthread_mutex_lock(&station_mutexs[new_sid]);
+	
 	struct client *tmp_client;
 	tmp_client = new_station->clients;
+	new_station->clients = client;
 	client->next = tmp_client;
 
 	client->sid = new_sid;
 	client->station = new_station;
 
-	pthread_mutex_lock(&station_mutexs[new_sid]);
+	pthread_mutex_unlock(&station_mutexs[new_sid]);
 	return 0;
 }
 
@@ -337,6 +359,7 @@ void* initial_client(void* client_for_fundation){
 				kill_client(fd);
 				break;
 			}
+
 			station_add_client(client, cmd.number);
 			send_songname(fd, stations[client->sid].songname);
 		}else{
@@ -373,22 +396,23 @@ void* intial_station(void* struct_station){
 	struct station* station = (struct station*)struct_station;
 	struct client* client;
 
-	FILE* file = fopen(station->file, "r");
+	FILE* file = fopen(station->songname, "r");
 	if (file == NULL){
 		printf("Fail to open %s \n", station->songname);
 		kill_station(station);
 	}
 	station->file = file;
 
-	//struct timespec waittime;
+	struct timespec interval, start_time, end_time;
+	
 	int bytes;
 	int buf_len = 1024;
 	unsigned char buffer[buf_len];
 
 	while(1){
-	//	waittime.tv_sec = 0;
-	//	waittime.tv_nsec = 62500000;
-
+        interval.tv_sec = 0;
+        interval.tv_nsec = NANO_PER_SEC/16;
+        clock_gettime(CLOCK_REALTIME, &start_time);
 
 		bytes = fread(buffer, 1, buf_len, file);
 
@@ -399,6 +423,7 @@ void* intial_station(void* struct_station){
 			pthread_mutex_lock(&station_mutexs[station->id]);
 			client = station->clients;
 			while (client != NULL){
+				printf("send_songname2 \n");
 				send_songname(client->fd, station->songname);
 				client = client->next;
 			}
@@ -414,7 +439,10 @@ void* intial_station(void* struct_station){
 			client = client->next;
 		}		
 		pthread_mutex_unlock(&station_mutexs[station->id]);
-		//nanosleep(waittime,NULL);
+		
+        clock_gettime(CLOCK_REALTIME, &end_time);
+        time_calibrate(start_time, end_time, &interval);
+        nanosleep(&interval, NULL);
 	}
 }
 
@@ -440,7 +468,8 @@ void accept_server(int client_fd, struct sockaddr_in client_addr, socklen_t clie
 }
 
 void quit_server(int n_stations, struct station* stations, int receiver_fd){
-	for (int i = 0; i < n_stations; i++){
+	int i;
+	for (i = 0; i < n_stations; i++){
 		pthread_mutex_lock(&station_mutexs[i]);
 		struct client* client = stations[i].clients;
 		while (client != NULL){
@@ -456,21 +485,23 @@ void quit_server(int n_stations, struct station* stations, int receiver_fd){
 	}
 	free(stations);
 	free(station_mutexs);
-	//exit(0);
+	close(receiver_fd);
+	exit(0);
 }
 
 void print_server(int n_stations,struct station* stations){
 	int addrstrlen = INET_ADDRSTRLEN;
 	char addrstr[addrstrlen];
 
-	for (int i = 0; i < n_stations; i++){
+	int i;
+	for (i = 0; i < n_stations; i++){
 		pthread_mutex_lock(&station_mutexs[i]);
 		printf("Station %d plays %s. \n Listener: \n", i, stations[i].songname);
 
 		struct client* client;
 		client = stations[i].clients;
 		while (client){
-			printf("%s:%d \n",get_sock_ip(&client->sockaddr,addrstr,addrstrlen));
+			printf("%s:%d; \n",get_sock_ip(&client->sockaddr,addrstr,addrstrlen),ntohs(client->sockaddr.sin_port));
 			client = client->next;
 		}
 		pthread_mutex_unlock(&station_mutexs[i]);
@@ -497,7 +528,7 @@ int open_receiver(const char* tcpport){
 
 	if ((receiver_fd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol)) < 0){
 		perror("Socket Error");
-		//exit(1);
+		exit(1);
 	}
 	bind(receiver_fd, servinfo->ai_addr, servinfo->ai_addrlen);
 	listen(receiver_fd, SOMAXCONN);

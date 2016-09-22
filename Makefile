@@ -24,5 +24,5 @@ LDFLAGS = -lpthread
 #for server
 snowcast_server:   snowcast_server.c
 clean:
-	rm -f snowcast_listener snowcast_control snowcast_server
+	rm -f snowcast_server
 
