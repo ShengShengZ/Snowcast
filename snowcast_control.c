@@ -191,7 +191,7 @@ void get_announce(unsigned char* buf, int buflen, struct song_msg* msg,int* stro
     return;
 }
 
-void receive_announce(int fd){
+int receive_announce(int fd){
 	int buf_len = 256;
 	unsigned char buffer[buf_len];
 	memset(buffer, 0, buf_len);
@@ -202,12 +202,14 @@ void receive_announce(int fd){
 		bytes = recv(fd, buffer, buf_len, 0);
 		if (bytes == 0){
 			close(fd);
+			return -1;
 		}
         get_announce(buffer, buf_len, &message, &stroff);
 	}while(bytes == buf_len);
 
 	printf("%s\n",message.string);
 	free(message.string);
+	return 0;
 }
 
 //-----main function------
@@ -262,8 +264,11 @@ int main(int argc, char * argv[]){
 	send_set_station(client_fd, station_number);
 	
 	while (1){
-		//failed to apply FD function here, so no quit function       	
-        receive_announce(client_fd);
+		//failed to apply select function here, so no quit function       	
+        if (receive_announce(client_fd) == -1){
+        	printf("Server closed \n");
+        	return 0;
+        }
 	}
 
 	return 0;
